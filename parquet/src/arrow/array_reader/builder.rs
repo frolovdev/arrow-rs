@@ -57,7 +57,7 @@ pub fn build_array_reader(
     }
 }
 
-fn build_reader(
+pub fn build_reader(
     field: &ParquetField,
     row_groups: &dyn RowGroupCollection,
 ) -> Result<Box<dyn ArrayReader>> {
@@ -74,11 +74,13 @@ fn build_reader(
 }
 
 /// Build array reader for map type.
-fn build_map_reader(
+pub fn build_map_reader(
     field: &ParquetField,
     row_groups: &dyn RowGroupCollection,
 ) -> Result<Box<dyn ArrayReader>> {
+    println!("type {}", field.arrow_type);
     let children = field.children().unwrap();
+    println!("children {:?}", children.len());
     assert_eq!(children.len(), 2);
 
     let key_reader = build_reader(&children[0], row_groups)?;

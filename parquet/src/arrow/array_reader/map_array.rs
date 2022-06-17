@@ -164,5 +164,107 @@ impl ArrayReader for MapArrayReader {
 
 #[cfg(test)]
 mod tests {
-    //TODO: Add unit tests (#1561)
+    use super::*;
+    use crate::arrow::array_reader::builder::{build_map_reader, build_reader};
+    
+    use crate::arrow::array_reader::map_array::MapArrayReader;
+    // use crate::arrow::array_reader::list_array::ListArrayReader;
+    // use crate::arrow::array_reader::test_util::InMemoryArrayReader;
+    use crate::arrow::schema::convert_schema;
+    use crate::arrow::{parquet_to_arrow_schema, ArrowWriter, ProjectionMask};
+    use crate::file::properties::WriterProperties;
+    use crate::file::reader::{FileReader, SerializedFileReader};
+    use crate::schema::parser::parse_message_type;
+    use crate::schema::types::SchemaDescriptor;
+    use arrow::array::{Array, MapArray, ArrayDataBuilder, PrimitiveArray};
+    use arrow::datatypes::{Field, Int32Type as ArrowInt32, Int32Type};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_nested_map() {
+        // Construct column schema
+        let message_type = "
+        message table {
+            repeated group my_group_map {
+                REQUIRED BYTE_ARRAY kek;
+                optional group map (MAP) {
+                    repeated group key_value {
+                        REQUIRED BYTE_ARRAY key;
+                        OPTIONAL group nested_map (MAP) {
+                            repeated group key_value {
+                                REQUIRED BYTE_ARRAY key;
+                                REQUIRED BYTE_ARRAY value;
+                            }
+                        }
+                    }
+                }
+            }
+            
+        }
+        ";
+
+        let schema = parse_message_type(message_type)
+            .map(|t| Arc::new(SchemaDescriptor::new(Arc::new(t))))
+            .unwrap();
+
+        let arrow_schema = parquet_to_arrow_schema(schema.as_ref(), None).unwrap();
+
+        println!("original schmea {:#?}", schema);
+        println!("schema {:#?}", arrow_schema);
+
+
+        let file = tempfile::tempfile().unwrap();
+        let props = WriterProperties::builder()
+
+            .build();
+
+        let writer = ArrowWriter::try_new(
+            file.try_clone().unwrap(),
+            Arc::new(arrow_schema),
+            Some(props),
+        )
+        .unwrap();
+        writer.close().unwrap();
+
+        let file_reader: Arc<dyn FileReader> =
+            Arc::new(SerializedFileReader::new(file).unwrap());
+
+        let file_metadata = file_reader.metadata().file_metadata();
+        let arrow_schema = parquet_to_arrow_schema(
+            file_metadata.schema_descr(),
+            file_metadata.key_value_metadata(),
+        )
+        .unwrap();
+
+        let schema = file_metadata.schema_descr_ptr();
+        let mask = ProjectionMask::all();
+
+
+        let field = convert_schema(schema.as_ref(), mask, Some(&arrow_schema)).unwrap().unwrap();
+        let mut map_array_reader = build_reader(&field, Box::new(file_reader).as_ref()).unwrap();
+        
+        // match &field {
+        //             Some(field) => build_reader(field, Box::new(file_reader).as_ref()).unwrap(),
+        //             None => panic!(""),
+        // };
+        
+
+        let batch = map_array_reader.next_batch(100).unwrap();
+
+        // println!("datatype {:#?}", batch.data_type());
+        assert_eq!(batch.data_type(), map_array_reader.get_data_type());
+        // assert_eq!(
+        //     batch.data_type(),
+        //     &ArrowType::Struct(vec![Field::new(
+        //         "table_info",
+        //         ArrowType::List(Box::new(Field::new(
+        //             "table_info",
+        //             ArrowType::Struct(vec![Field::new("name", ArrowType::Binary, false)]),
+        //             false
+        //         ))),
+        //         false
+        //     )])
+        // );
+        // assert_eq!(batch.len(), 0);
+    }
 }
